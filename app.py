@@ -31,6 +31,15 @@ DEFAULT_SETTINGS = {
 }
 
 
+def parse_input_sources(raw_value: str) -> list[str]:
+    return [line.strip() for line in raw_value.splitlines() if line.strip()]
+
+
+def get_source_label(input_source: str) -> str:
+    normalized_source = input_source.rstrip("/\\")
+    return os.path.basename(normalized_source) or input_source
+
+
 def initialize_settings() -> None:
     stored_settings = load_settings()
     for key in SETTING_KEYS:
@@ -56,70 +65,98 @@ st.set_page_config(
 initialize_settings()
 
 with st.sidebar:
-    st.header("⚙️ Cấu hình hệ thống")
-    st.caption("Các giá trị bên dưới được lưu cục bộ vào SQLite và tự nạp lại khi bạn mở lại localhost.")
+    st.header("Cau hinh he thong")
+    st.caption("Cac gia tri nhap trong giao dien se duoc luu vao SQLite va giu lai cho cac lan mo localhost sau.")
 
     st.subheader("1. Whisper")
     st.text_input("Whisper Base URL", key="whisper_url")
     st.text_input(
         "Whisper Model",
         key="whisper_model",
-        help="Ví dụ: whisper-1 hoặc whisper-large-v3-turbo",
+        help="Vi du: whisper-1 hoac whisper-large-v3-turbo",
     )
     st.text_area(
         "Whisper API Key(s)",
         key="whisper_key",
         height=80,
-        help="Có thể nhập nhiều key, phân tách bằng dấu phẩy.",
+        help="Co the nhap nhieu key, tach nhau bang dau phay.",
     )
 
     key_count = len([key for key in st.session_state["whisper_key"].split(",") if key.strip()])
     if key_count > 1:
-        st.caption(f"Đã phát hiện {key_count} Whisper API keys. Cơ chế xoay vòng key sẽ được dùng khi cần.")
+        st.caption(f"Da phat hien {key_count} Whisper API keys. Co che xoay vong key se duoc dung khi can.")
 
     st.subheader("2. LLM")
     st.text_input("LLM Base URL", key="llm_url")
-    st.text_input("LLM Tên Model", key="llm_model")
+    st.text_input("LLM Ten Model", key="llm_model")
     st.text_input("LLM API Key", key="llm_key", type="password")
     st.markdown("---")
-    st.caption("Hỗ trợ OpenAI, Gemini hoặc các dịch vụ tương thích chuẩn OpenAI.")
+    st.caption("Ho tro OpenAI, Gemini hoac cac dich vu tuong thich chuan OpenAI.")
 
 persist_settings()
 
-st.title("🎬 Tool trích xuất video highlight tự động")
+st.title("Tool trich xuat video highlight tu dong")
 st.markdown(
-    "Ứng dụng kết hợp Whisper và LLM để phân tích video dài, tìm các cao trào và cắt thành nhiều phần ngắn."
+    "Ung dung ket hop Whisper va LLM de phan tich video dai, tim cao trao va cat thanh nhieu doan ngan."
 )
 
-input_source = st.text_input(
-    "🔗 Nhập URL YouTube hoặc đường dẫn file video (.mp4)",
-    placeholder="https://www.youtube.com/watch?v=....",
+input_sources_text = st.text_area(
+    "Nhap URL YouTube hoac duong dan file video (.mp4), moi dong mot muc",
+    placeholder="https://www.youtube.com/watch?v=video_1\nhttps://www.youtube.com/watch?v=video_2",
+    height=140,
 )
 
-if st.button("🚀 Trích xuất highlight ngay", type="primary", use_container_width=True):
-    if not input_source:
-        st.error("Vui lòng nhập link video hoặc đường dẫn file.")
+if st.button("Trich xuat highlight ngay", type="primary", use_container_width=True):
+    input_sources = parse_input_sources(input_sources_text)
+
+    if not input_sources:
+        st.error("Vui long nhap it nhat 1 URL hoac duong dan file.")
     else:
         config_data = {key: st.session_state[key] for key in SETTING_KEYS}
+        total_sources = len(input_sources)
+        results_by_source: list[tuple[str, list[str]]] = []
+        failed_sources: list[tuple[str, str]] = []
 
-        progress_bar = st.progress(0, text="Khởi động hệ thống...")
+        progress_bar = st.progress(0, text="Khoi dong he thong...")
         status_text = st.empty()
 
-        def update_progress(percent: float, message: str) -> None:
-            progress_bar.progress(max(0.0, min(1.0, percent / 100.0)), text=message)
-            status_text.info(message)
+        with st.spinner("He thong dang xu ly tung video theo thu tu..."):
+            for source_index, input_source in enumerate(input_sources, start=1):
+                source_label = get_source_label(input_source)
 
-        try:
-            with st.spinner("Hệ thống đang xử lý video..."):
-                final_videos = run_pipeline(
-                    input_source,
-                    config=config_data,
-                    progress_callback=update_progress,
-                )
+                def update_progress(
+                    percent: float,
+                    message: str,
+                    *,
+                    current_index: int = source_index,
+                    current_label: str = source_label,
+                ) -> None:
+                    overall_percent = ((current_index - 1) + (percent / 100.0)) / total_sources
+                    progress_text = f"[{current_index}/{total_sources}] {current_label}: {message}"
+                    progress_bar.progress(max(0.0, min(1.0, overall_percent)), text=progress_text)
+                    status_text.info(progress_text)
 
-            progress_bar.progress(1.0, text="Hoàn tất")
-            status_text.success("Render highlight thành công.")
-            st.markdown("### Danh sách video highlight")
+                try:
+                    final_videos = run_pipeline(
+                        input_source,
+                        config=config_data,
+                        progress_callback=update_progress,
+                    )
+                    results_by_source.append((input_source, final_videos))
+                except Exception as exc:
+                    failed_sources.append((input_source, str(exc)))
+
+        progress_bar.progress(1.0, text="Hoan tat")
+
+        if failed_sources:
+            status_text.warning("Da xu ly xong danh sach, co muc bi loi.")
+        else:
+            status_text.success("Da xu ly xong toan bo danh sach.")
+
+        st.markdown("### Danh sach video highlight")
+
+        for input_source, final_videos in results_by_source:
+            st.markdown(f"#### {input_source}")
 
             if final_videos:
                 cols = st.columns(2)
@@ -130,10 +167,9 @@ if st.button("🚀 Trích xuất highlight ngay", type="primary", use_container_
                             with open(video_file, "rb") as video_handle:
                                 st.video(video_handle.read())
                         except Exception:
-                            st.error("Không thể tải player cho video này.")
+                            st.error("Khong the hien thi player cho video nay.")
             else:
-                st.warning("Không tạo được highlight nào từ video này.")
+                st.warning("Khong tao duoc highlight nao tu nguon nay.")
 
-        except Exception as exc:
-            st.error(f"Có lỗi xảy ra trong quá trình chạy: {exc}")
-            progress_bar.empty()
+        for input_source, error_message in failed_sources:
+            st.error(f"Loi khi xu ly {input_source}: {error_message}")

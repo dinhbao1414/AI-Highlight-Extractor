@@ -38,10 +38,10 @@ def download_youtube_video(url: str, output_dir: str = "downloads") -> str:
         print(f"Đã tải xong: {filename}")
         return filename
 
-def get_video_path(input_source: str) -> str:
+def get_video_path(input_source: str, output_dir: str = "downloads") -> str:
     """Xử lý input: Tải về nếu là URL youtube, hoặc verify nếu là file máy tính."""
     if is_youtube_url(input_source):
-        return download_youtube_video(input_source)
+        return download_youtube_video(input_source, output_dir=output_dir)
     else:
         file_path = Path(input_source)
         if file_path.exists() and file_path.is_file():
